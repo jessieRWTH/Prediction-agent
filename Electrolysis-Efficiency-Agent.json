@@ -1,0 +1,291 @@
+{
+  "name": "Electrolysis-Efficiency-Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "efficiency-agent",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        260
+      ],
+      "id": "9b8c7e37-b31a-4e9c-8bfa-1ba33c553f7e",
+      "name": "Webhook",
+      "webhookId": "ee791d33-d2ba-4d56-ae3f-01c86a0985f3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer QMoAYJInnglNMmzkw7FgI5YUNxYs4NEs"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral-small-latest\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Extract intent and parameters from user request. Output JSON ONLY with: intent ('predict_run' or 'summarize_best'), voltage (float), temperature (float). Convert units to V and °C. Example: 'Predict at 1.9 volts, 75C' → {'intent':'predict_run','voltage':1.9,'temperature':75}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{$json.body.text}}\"\n    }\n  ],\n  \"response_format\": {\"type\": \"json_object\"},\n  \"temperature\": 0.1\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        260
+      ],
+      "id": "957f78de-88b3-4eb4-a52f-735c66913fce",
+      "name": "Mistral API Integration"
+    },
+    {
+      "parameters": {
+        "jsCode": "let content;\n\ntry {\n  content = $json.choices[0].message.content;\n  const parsed = JSON.parse(content);\n  return [{ json: parsed }];\n} catch (err) {\n  return [{\n    json: {\n      error: \"LLM parsing failed\",\n      advice: \"Please use format: 'predict efficiency at 1.8V, 75°C'\",\n      raw_content: content || \"No content found\",\n      raw_response: $json\n    }\n  }];\n}\n\nconsole.log($json); // 用於 Debug\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        260
+      ],
+      "id": "41e11d73-a0cf-414b-b4ac-f7ae02d4400e",
+      "name": "Parse Mistral API Response"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intent\"]}}",
+                    "rightValue": "predict_run",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "805837f2-9a3d-4ac7-bd1e-3dedbb436ef8"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "da28c46d-037e-4150-899b-f4f99e9a2d01",
+                    "leftValue": "={{$json[\"intent\"]}}",
+                    "rightValue": "summarize_best",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "ignoreCase": false
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        660,
+        260
+      ],
+      "id": "080ba7c0-db15-4d83-976c-355c77cf8a90",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "jsCode": "const coefficients = {\n  intercept: 22.1581,\n  voltage: 10.2944,\n  temperature: 0.1918\n};\n\nconst voltage = $json.voltage;\nconst temperature = $json.temperature;\n\nif (!voltage || !temperature) {\n  return [{ json: { error: \"Missing parameters\" } }];\n}\n\nconst efficiency = (\n  coefficients.intercept +\n  coefficients.voltage * voltage +\n  coefficients.temperature * temperature\n).toFixed(2);\n\nreturn [{\n  json: {\n    prediction: `${efficiency}%`,\n    parameters: { voltage, temperature },\n    model_info: \"Linear Regression (voltage & temp)\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        160
+      ],
+      "id": "f24bc5ec-d5d6-4f5a-8ee6-d71d94a14064",
+      "name": "Prediction Branch (Linear Regression)"
+    },
+    {
+      "parameters": {
+        "url": "https://gist.githubusercontent.com/jessieRWTH/45bfa0fe37755180721c939021504190/raw/74d9581c551841026cf5729bc2fd3ca72cd1923d/experimental_data_pem.csv",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        360
+      ],
+      "id": "18950597-d240-45ac-9895-f5e935673f62",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "enableResponseOutput": "={{ false }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1320,
+        260
+      ],
+      "id": "7d7e9786-8fe1-4b30-9ab7-db04e9a96b33",
+      "name": "Respond to Webhook",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const csvData = $json.body;\nconst rows = csvData.trim().split('\\n');\nconst headers = rows[0].split(',').map(h => h.trim());\n\nlet bestEfficiency = -Infinity;\nlet bestExperiment = null;\n\nfor (let i = 1; i < rows.length; i++) {\n  const row = rows[i].split(',');\n  if (row.length !== headers.length) continue;\n\n  const efficiency = parseFloat(row[headers.indexOf('efficiency_%')]);\n  \n  if (!isNaN(efficiency) && efficiency > bestEfficiency) {\n    bestEfficiency = efficiency;\n    bestExperiment = {};\n    headers.forEach((header, idx) => {\n      bestExperiment[header] = row[idx].trim();\n    });\n  }\n}\n\nreturn bestExperiment\n  ? [{ json: { best_experiment: bestExperiment } }]\n  : [{ json: { error: \"No valid experiments found\" } }];\n\nreturn bestExperiment \n  ? [{ json: { best_experiment: bestExperiment } }] \n  : [{ json: { error: \"No valid experiments found\" } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        360
+      ],
+      "id": "73192df4-bc04-4cb2-8f74-c23a1c7e38ef",
+      "name": " Summarizer Branch (CSV Processing)"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Mistral API Integration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral API Integration": {
+      "main": [
+        [
+          {
+            "node": "Parse Mistral API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Mistral API Response": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Prediction Branch (Linear Regression)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": " Summarizer Branch (CSV Processing)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prediction Branch (Linear Regression)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    " Summarizer Branch (CSV Processing)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "65bd3406-f37a-49f0-a6bf-5f5bc710f4b0",
+  "meta": {
+    "instanceId": "a5e72e97b9cdbe923f25baca307a15e19d98552ed7eda491a6498bc74c67411f"
+  },
+  "id": "YKg99IM3s3mQ9I3K",
+  "tags": []
+}
